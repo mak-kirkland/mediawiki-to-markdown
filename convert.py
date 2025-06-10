@@ -35,10 +35,25 @@ tag_to_pages = defaultdict(list)
 filename_counts = defaultdict(int)
 
 def clean_filename(title):
+    """Convert to safe filename with underscores"""
     return INVALID_FILENAME_CHARS.sub('_', title.strip())
+
+def display_title(title):
+    """Convert to human-readable title with spaces"""
+    return title.replace('_', ' ')
 
 def contains_wikilink(s):
     return isinstance(s, str) and ('[[' in s and ']]' in s)
+
+def fix_wikilink_spacing(text):
+    """Convert underscores to spaces in wikilinks"""
+    def replacer(match):
+        link_content = match.group(1)
+        if '|' in link_content:
+            target, alias = link_content.split('|', 1)
+            return f"[[{target.replace('_', ' ')}|{alias}]]"
+        return f"[[{link_content.replace('_', ' ')}]]"
+    return WIKILINK_REGEX.sub(replacer, text)
 
 def extract_categories(wikicode):
     categories = []
@@ -93,7 +108,10 @@ def extract_infobox(wikicode):
     return wikicode, infobox_data
 
 def extract_yaml_header(title, tags, extra_fields=None):
-    yaml = {'title': title, 'tags': [t.replace(" ", "_").lower() for t in tags]}
+    yaml = {
+        'title': display_title(title),
+        'tags': [display_title(t).lower() for t in tags]
+    }
     if extra_fields:
         yaml.update(extra_fields)
 
@@ -103,12 +121,12 @@ def extract_yaml_header(title, tags, extra_fields=None):
             lines.append(f"{key}:")
             for item in value:
                 if contains_wikilink(item):
-                    lines.append(f'  - "{item}"')
+                    lines.append(f'  - "{fix_wikilink_spacing(item)}"')
                 else:
                     lines.append(f'  - {json.dumps(item) if isinstance(item, str) else item}')
         else:
             if contains_wikilink(value):
-                lines.append(f'{key}: "{value}"')
+                lines.append(f'{key}: "{fix_wikilink_spacing(value)}"')
             else:
                 lines.append(f'{key}: {json.dumps(value) if isinstance(value, str) else value}')
     lines.append('---\n')
@@ -123,7 +141,7 @@ def extract_links_from_pandoc(md_text):
         target = match.group(2).replace(' "wikilink"', '').strip()
         if target.startswith(('http://', 'https://', 'mailto:')):
             return match.group(0)
-        return f"[[{target}|{text}]]" if text != target else f"[[{target}]]"
+        return f"[[{target.replace('_', ' ')}|{text}]]" if text != target else f"[[{target.replace('_', ' ')}]]"
     return PANDOC_LINK_REGEX.sub(replacer, md_text)
 
 def clean_residual_wikilink_artifacts(md_text):
@@ -133,7 +151,7 @@ def fix_multiline_wikilinks(md_text):
     def replacer(match):
         content = match.group(1)
         clean_content = ' '.join(content.split())
-        return f"[[{clean_content}]]"
+        return f"[[{clean_content.replace('_', ' ')}]]"
     return WIKILINK_REGEX.sub(replacer, md_text)
 
 def cleanup_markdown(md):
@@ -141,6 +159,7 @@ def cleanup_markdown(md):
     md = clean_heading_ids(md)
     md = extract_links_from_pandoc(md)
     md = clean_residual_wikilink_artifacts(md)
+    md = fix_wikilink_spacing(md)
     return md
 
 def convert_with_pandoc(text, title=""):
@@ -224,9 +243,11 @@ def create_tag_indexes():
 
     for tag, pages in tag_to_pages.items():
         safe_tag = clean_filename(tag)
-        lines = [f"# {tag.replace('_', ' ').title()} Index\n"]
+        display_tag = display_title(tag)
+        lines = [f"# {display_tag.title()} Index\n"]
         for page in sorted(pages):
-            lines.append(f"- [[{page}]]")
+            display_page = display_title(page)
+            lines.append(f"- [[{display_page}]]")
         with open(os.path.join(index_dir, f"{safe_tag}.md"), "w", encoding="utf-8") as f:
             f.write("\n".join(lines))
     print("📚 Index pages created under _indexes/")
