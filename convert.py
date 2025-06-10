@@ -40,31 +40,29 @@ def clean_filename(title):
 def contains_wikilink(s):
     return isinstance(s, str) and ('[[' in s and ']]' in s)
 
-def extract_categories(text):
-    wikicode = mwparserfromhell.parse(text)
+def extract_categories(wikicode):
     categories = []
     for link in wikicode.ifilter_wikilinks():
-        target = str(link.title).strip()
+        target = link.title.strip()
         if target.lower().startswith("category:"):
             cat = target[len("category:"):].strip()
             categories.append(cat)
             wikicode.remove(link)
-    return str(wikicode).strip(), categories
+    return wikicode, categories
 
-def extract_infobox_to_yaml(text):
-    wikicode = mwparserfromhell.parse(text)
+def extract_infobox(wikicode):
     infobox_data = {}
     infobox_template = None
 
     for template in wikicode.filter_templates():
-        if str(template.name).strip().lower():
+        if template.name.strip():
             infobox_template = template
             break
 
     if not infobox_template:
-        return str(wikicode), {}
+        return wikicode, {}
 
-    raw_name = str(infobox_template.name).strip().lower()
+    raw_name = infobox_template.name.strip().lower()
     if raw_name.startswith("infobox_"):
         infobox_type = raw_name[len("infobox_"):].replace(' ', '_').title()
     else:
@@ -73,8 +71,8 @@ def extract_infobox_to_yaml(text):
     infobox_data['infobox'] = infobox_type
 
     for param in infobox_template.params:
-        key = str(param.name).strip().replace(":", "").lower()
-        val = str(param.value).strip()
+        key = param.name.strip().replace(":", "").lower()
+        val = param.value.strip()
 
         wikilinks = WIKILINK_REGEX.findall(val)
         if wikilinks:
@@ -92,7 +90,7 @@ def extract_infobox_to_yaml(text):
             infobox_data[key] = val
 
     wikicode.remove(infobox_template)
-    return str(wikicode).strip(), infobox_data
+    return wikicode, infobox_data
 
 def extract_yaml_header(title, tags, extra_fields=None):
     yaml = {'title': title, 'tags': [t.replace(" ", "_").lower() for t in tags]}
@@ -138,6 +136,13 @@ def fix_multiline_wikilinks(md_text):
         return f"[[{clean_content}]]"
     return WIKILINK_REGEX.sub(replacer, md_text)
 
+def cleanup_markdown(md):
+    md = fix_multiline_wikilinks(md)
+    md = clean_heading_ids(md)
+    md = extract_links_from_pandoc(md)
+    md = clean_residual_wikilink_artifacts(md)
+    return md
+
 def convert_with_pandoc(text, title=""):
     try:
         result = subprocess.run(
@@ -149,11 +154,7 @@ def convert_with_pandoc(text, title=""):
         )
         md = result.stdout.decode("utf-8")
         md = md.replace("\\'", "'")
-        md = fix_multiline_wikilinks(md)
-        md = clean_heading_ids(md)
-        md = extract_links_from_pandoc(md)
-        md = clean_residual_wikilink_artifacts(md)
-        return md
+        return cleanup_markdown(md)
     except subprocess.CalledProcessError as e:
         print(f"⚠️ Pandoc failed for '{title}'. Using raw text.")
         print(e.stderr.decode())
@@ -161,21 +162,25 @@ def convert_with_pandoc(text, title=""):
 
 def clean_and_convert_text(raw_text, title):
     text = unescape(raw_text)
-    text, tags = extract_categories(text)
-    text, infobox_data = extract_infobox_to_yaml(text)
+    wikicode = mwparserfromhell.parse(text)
+
+    wikicode, tags = extract_categories(wikicode)
+    wikicode, infobox_data = extract_infobox(wikicode)
+
+    cleaned_text = str(wikicode).strip()
     yaml_header = extract_yaml_header(title, tags, infobox_data)
 
     for tag in tags:
         normalized_tag = tag.replace(" ", "_").lower()
         tag_to_pages[normalized_tag].append(title)
 
-    return yaml_header + "\n" + text.strip() + "\n", tags
+    return yaml_header + "\n" + cleaned_text + "\n", tags
 
 def convert_pages(tree):
     ns = {"ns": NS}
     for page in tree.findall(".//ns:page", ns):
         title_elem = page.find("ns:title", ns)
-        if title_elem is None:
+        if title_elem is None or not title_elem.text:
             continue
         title = title_elem.text.strip()
         print("✅ Found page:", title)
