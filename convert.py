@@ -26,18 +26,6 @@ filename_counts = defaultdict(int)
 def clean_filename(title):
     return re.sub(r'[\\/*?:"<>|]', '_', title.strip())
 
-def extract_links(text):
-    wikicode = mwparserfromhell.parse(text)
-    for link in wikicode.ifilter_wikilinks():
-        title = str(link.title).strip()
-        if "|" in title:
-            target, alias = map(str.strip, title.split("|", 1))
-            new = f"[[{alias}]]"
-        else:
-            new = f"[[{title}]]"
-        wikicode.replace(link, new)
-    return str(wikicode)
-
 def extract_categories(text):
     wikicode = mwparserfromhell.parse(text)
     categories = []
@@ -55,7 +43,7 @@ def extract_infobox_to_yaml(text):
     infobox_template = None
 
     for template in wikicode.filter_templates():
-        if str(template.name).strip().lower().startswith("infobox"):
+        if str(template.name).strip().lower():
             infobox_template = template
             break
 
@@ -66,14 +54,14 @@ def extract_infobox_to_yaml(text):
     if raw_name.startswith("infobox_"):
         infobox_type = raw_name[len("infobox_"):].replace(' ', '_').title()
     else:
-        infobox_type = "Generic"
+        infobox_type = infobox_template.name
 
     infobox_data['infobox'] = infobox_type
 
     for param in infobox_template.params:
-        key = str(param.name).strip()
+        # Handle malformed keys with colons
+        key = str(param.name).strip().replace(":", "").lower()
         val = str(param.value).strip()
-        val = re.sub(r'\[\[(.+?)\]\]', lambda m: m.group(1).split("|")[-1], val)
         infobox_data[key] = val
 
     wikicode.remove(infobox_template)
@@ -164,10 +152,9 @@ def convert_with_pandoc(text):
 
         # Fix pandoc escaping of single quotes like It\'s
         md = md.replace("\\'", "'")
-
-        md = extract_links_from_pandoc(md)
         md = fix_multiline_wikilinks(md)
         md = clean_heading_ids(md)
+        md = extract_links_from_pandoc(md)
         return md
     except subprocess.CalledProcessError as e:
         print("⚠️ Pandoc conversion failed. Using unconverted text.")
@@ -176,7 +163,6 @@ def convert_with_pandoc(text):
 
 def clean_and_convert_text(raw_text, title):
     text = unescape(raw_text)
-    text = extract_links(text)
     text, tags = extract_categories(text)
     text, infobox_data = extract_infobox_to_yaml(text)
     yaml_header = extract_yaml_header(title, tags, infobox_data)
