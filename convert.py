@@ -6,10 +6,21 @@ from html import unescape
 from collections import defaultdict
 import mwparserfromhell
 import sys
+import json
 
+# Constants
 NS = "http://www.mediawiki.org/xml/export-0.11/"
 TAG = lambda t: f"{{{NS}}}{t}"
 USE_PANDOC = True
+
+# Pre-compiled regex patterns
+INVALID_FILENAME_CHARS = re.compile(r'[\\/*?:"<>|]')
+HEADING_ID_REGEX = re.compile(r'^(#{1,6} .+?)\s*\{\#.*?\}', re.MULTILINE)
+WIKILINK_REGEX = re.compile(r'\[\[(.*?)\]\]', re.DOTALL)
+PANDOC_LINK_REGEX = re.compile(
+    r'\[([^\]]+)\]\(((?:[^\(\)]+|\([^\)]*\))+)(?:\s+"wikilink")?\)'
+)
+YAML_FRONTMATTER_REGEX = re.compile(r'(?s)^---\n(.*?)\n---\n(.*)')
 
 if len(sys.argv) < 2:
     print(f"Usage: {sys.argv[0]} <input_xml_file> [output_dir]")
@@ -24,7 +35,10 @@ tag_to_pages = defaultdict(list)
 filename_counts = defaultdict(int)
 
 def clean_filename(title):
-    return re.sub(r'[\\/*?:"<>|]', '_', title.strip())
+    return INVALID_FILENAME_CHARS.sub('_', title.strip())
+
+def contains_wikilink(s):
+    return isinstance(s, str) and ('[[' in s and ']]' in s)
 
 def extract_categories(text):
     wikicode = mwparserfromhell.parse(text)
@@ -62,8 +76,7 @@ def extract_infobox_to_yaml(text):
         key = str(param.name).strip().replace(":", "").lower()
         val = str(param.value).strip()
 
-        # Split values containing wikilinks into lists
-        wikilinks = re.findall(r'\[\[([^\]]+)\]\]', val)
+        wikilinks = WIKILINK_REGEX.findall(val)
         if wikilinks:
             parts = []
             remaining = val
@@ -91,113 +104,58 @@ def extract_yaml_header(title, tags, extra_fields=None):
         if isinstance(value, list):
             lines.append(f"{key}:")
             for item in value:
-                # Always quote list items that contain square brackets (Obsidian links)
-                if isinstance(item, str) and ('[[' in item or ']]' in item):
+                if contains_wikilink(item):
                     lines.append(f'  - "{item}"')
                 else:
-                    lines.append(f'  - "{item}"' if isinstance(item, str) else f'  - {item}')
+                    lines.append(f'  - {json.dumps(item) if isinstance(item, str) else item}')
         else:
-            # Always quote values containing square brackets (Obsidian links)
-            if isinstance(value, str) and ('[[' in value or ']]' in value):
+            if contains_wikilink(value):
                 lines.append(f'{key}: "{value}"')
             else:
-                lines.append(f'{key}: "{value}"' if isinstance(value, str) else f'{key}: {value}')
+                lines.append(f'{key}: {json.dumps(value) if isinstance(value, str) else value}')
     lines.append('---\n')
     return "\n".join(lines)
 
-def unwrap_text_paragraphs(text):
-    text = text.replace('\r\n', '\n').replace('\r', '\n')
-    lines = [line.rstrip() for line in text.split('\n')]
-
-    unwrapped = []
-    buffer = []
-    in_code_block = False
-
-    def flush_buffer():
-        if buffer:
-            paragraph = " ".join(buffer)
-            unwrapped.append(paragraph)
-            buffer.clear()
-
-    for line in lines:
-        stripped = line.strip()
-
-        # detect fenced code block start/end
-        if stripped.startswith("```") or stripped.startswith("~~~"):
-            flush_buffer()
-            in_code_block = not in_code_block
-            unwrapped.append(line)
-            continue
-
-        if in_code_block:
-            unwrapped.append(line)
-            continue
-
-        if not stripped:
-            flush_buffer()
-            unwrapped.append("")
-        elif re.match(r'^(\s*[-*+]\s+|\s*#)', line):
-            flush_buffer()
-            unwrapped.append(line)
-        else:
-            buffer.append(stripped)
-
-    flush_buffer()
-    return "\n".join(unwrapped)
-
 def clean_heading_ids(md_text):
-    # Remove {#id} fragments after headers, e.g. ## Title {#id} -> ## Title
-    return re.sub(r'^(#{1,6} .+?)\s*\{\#.*?\}', r'\1', md_text, flags=re.MULTILINE)
+    return HEADING_ID_REGEX.sub(r'\1', md_text)
 
 def extract_links_from_pandoc(md_text):
-    """
-    Convert all [text](target) and [text](target "wikilink") to [[target|text]].
-    Handles parentheses in targets (e.g., "Sofia(town)").
-    """
-    # Regex to match [text](target) or [text](target "wikilink")
-    pattern = re.compile(
-        r'\[([^\]]+)\]\(([^\)]+?(?:\([^\)]*\))?(?:\s+"wikilink")?)\)'
-    )
-
     def replacer(match):
         text = match.group(1).strip()
         target = match.group(2).replace(' "wikilink"', '').strip()
+        if target.startswith(('http://', 'https://', 'mailto:')):
+            return match.group(0)
         return f"[[{target}|{text}]]" if text != target else f"[[{target}]]"
-
-    return pattern.sub(replacer, md_text)
+    return PANDOC_LINK_REGEX.sub(replacer, md_text)
 
 def clean_residual_wikilink_artifacts(md_text):
-    """Clean up any remaining "wikilink" strings that weren't caught earlier."""
     return md_text.replace(' "wikilink"', '')
 
 def fix_multiline_wikilinks(md_text):
-    pattern = re.compile(r'\[\[(.*?)\]\]', re.DOTALL)
     def replacer(match):
         content = match.group(1)
         clean_content = ' '.join(content.split())
         return f"[[{clean_content}]]"
-    return pattern.sub(replacer, md_text)
+    return WIKILINK_REGEX.sub(replacer, md_text)
 
-def convert_with_pandoc(text):
+def convert_with_pandoc(text, title=""):
     try:
         result = subprocess.run(
-            ['pandoc', '--from=mediawiki', '--to=markdown'],
+            ['pandoc', '--from=mediawiki', '--to=markdown', '--wrap=none'],
             input=text.encode("utf-8"),
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             check=True
         )
         md = result.stdout.decode("utf-8")
-
-        # Fix common Pandoc artifacts
         md = md.replace("\\'", "'")
         md = fix_multiline_wikilinks(md)
         md = clean_heading_ids(md)
-        md = extract_links_from_pandoc(md)      # Handle wikilinks
-        md = clean_residual_wikilink_artifacts(md)  # Clean leftovers
+        md = extract_links_from_pandoc(md)
+        md = clean_residual_wikilink_artifacts(md)
         return md
     except subprocess.CalledProcessError as e:
-        print("⚠️ Pandoc conversion failed. Using unconverted text.")
+        print(f"⚠️ Pandoc failed for '{title}'. Using raw text.")
         print(e.stderr.decode())
         return text
 
@@ -236,13 +194,10 @@ def convert_pages(tree):
         markdown, tags = clean_and_convert_text(raw_text, title)
 
         if USE_PANDOC:
-            yaml_match = re.match(r'(?s)^---\n(.*?)\n---\n(.*)', markdown)
+            yaml_match = YAML_FRONTMATTER_REGEX.match(markdown)
             if yaml_match:
                 yaml_block, content = yaml_match.groups()
-                converted_md = unwrap_text_paragraphs(content)
-                converted_md = convert_with_pandoc(converted_md)
-                converted_md = unwrap_text_paragraphs(converted_md)
-
+                converted_md = convert_with_pandoc(content, title)
                 markdown = f"---\n{yaml_block}\n---\n{converted_md}"
 
         base_filename = clean_filename(title)
