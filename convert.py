@@ -1,0 +1,262 @@
+import os
+import re
+import subprocess
+import xml.etree.ElementTree as ET
+from html import unescape
+from collections import defaultdict
+import mwparserfromhell
+import sys
+
+NS = "http://www.mediawiki.org/xml/export-0.11/"
+TAG = lambda t: f"{{{NS}}}{t}"
+USE_PANDOC = True
+
+if len(sys.argv) < 2:
+    print(f"Usage: {sys.argv[0]} <input_xml_file> [output_dir]")
+    sys.exit(1)
+
+INPUT_XML = sys.argv[1]
+OUTPUT_DIR = sys.argv[2] if len(sys.argv) > 2 else "obsidian_vault"
+
+os.makedirs(OUTPUT_DIR, exist_ok=True)
+
+tag_to_pages = defaultdict(list)
+filename_counts = defaultdict(int)
+
+def clean_filename(title):
+    return re.sub(r'[\\/*?:"<>|]', '_', title.strip())
+
+def extract_links(text):
+    wikicode = mwparserfromhell.parse(text)
+    for link in wikicode.ifilter_wikilinks():
+        title = str(link.title).strip()
+        if "|" in title:
+            target, alias = map(str.strip, title.split("|", 1))
+            new = f"[[{alias}]]"
+        else:
+            new = f"[[{title}]]"
+        wikicode.replace(link, new)
+    return str(wikicode)
+
+def extract_categories(text):
+    wikicode = mwparserfromhell.parse(text)
+    categories = []
+    for link in wikicode.ifilter_wikilinks():
+        target = str(link.title).strip()
+        if target.lower().startswith("category:"):
+            cat = target[len("category:"):].strip()
+            categories.append(cat)
+            wikicode.remove(link)
+    return str(wikicode).strip(), categories
+
+def extract_infobox_to_yaml(text):
+    wikicode = mwparserfromhell.parse(text)
+    infobox_data = {}
+    infobox_template = None
+
+    for template in wikicode.filter_templates():
+        if str(template.name).strip().lower().startswith("infobox"):
+            infobox_template = template
+            break
+
+    if not infobox_template:
+        return str(wikicode), {}
+
+    raw_name = str(infobox_template.name).strip().lower()
+    if raw_name.startswith("infobox_"):
+        infobox_type = raw_name[len("infobox_"):].replace(' ', '_').title()
+    else:
+        infobox_type = "Generic"
+
+    infobox_data['infobox'] = infobox_type
+
+    for param in infobox_template.params:
+        key = str(param.name).strip()
+        val = str(param.value).strip()
+        val = re.sub(r'\[\[(.+?)\]\]', lambda m: m.group(1).split("|")[-1], val)
+        infobox_data[key] = val
+
+    wikicode.remove(infobox_template)
+    return str(wikicode).strip(), infobox_data
+
+def extract_yaml_header(title, tags, extra_fields=None):
+    yaml = {'title': title, 'tags': [t.replace(" ", "_").lower() for t in tags]}
+    if extra_fields:
+        yaml.update(extra_fields)
+    lines = ['---']
+    for k, v in yaml.items():
+        if isinstance(v, list):
+            lines.append(f"{k}:")
+            for item in v:
+                lines.append(f"  - {item}")
+        else:
+            lines.append(f'{k}: "{v}"')
+    lines.append('---\n')
+    return "\n".join(lines)
+
+def unwrap_text_paragraphs(text):
+    text = text.replace('\r\n', '\n').replace('\r', '\n')
+    lines = [line.rstrip() for line in text.split('\n')]
+
+    unwrapped = []
+    buffer = []
+    in_code_block = False
+
+    def flush_buffer():
+        if buffer:
+            paragraph = " ".join(buffer)
+            unwrapped.append(paragraph)
+            buffer.clear()
+
+    for line in lines:
+        stripped = line.strip()
+
+        # detect fenced code block start/end
+        if stripped.startswith("```") or stripped.startswith("~~~"):
+            flush_buffer()
+            in_code_block = not in_code_block
+            unwrapped.append(line)
+            continue
+
+        if in_code_block:
+            unwrapped.append(line)
+            continue
+
+        if not stripped:
+            flush_buffer()
+            unwrapped.append("")
+        elif re.match(r'^(\s*[-*+]\s+|\s*#)', line):
+            flush_buffer()
+            unwrapped.append(line)
+        else:
+            buffer.append(stripped)
+
+    flush_buffer()
+    return "\n".join(unwrapped)
+
+def clean_heading_ids(md_text):
+    # Remove {#id} fragments after headers, e.g. ## Title {#id} -> ## Title
+    return re.sub(r'^(#{1,6} .+?)\s*\{\#.*?\}', r'\1', md_text, flags=re.MULTILINE)
+
+def extract_links_from_pandoc(md_text):
+    # Convert markdown links with title "wikilink" to Obsidian style [[link]]
+    pattern = re.compile(r'\[([^\]]+)\]\(([^\)]+) "wikilink"\)')
+    return pattern.sub(r'[[\1]]', md_text)
+
+def fix_multiline_wikilinks(md_text):
+    pattern = re.compile(r'\[\[(.*?)\]\]', re.DOTALL)
+    def replacer(match):
+        content = match.group(1)
+        clean_content = ' '.join(content.split())
+        return f"[[{clean_content}]]"
+    return pattern.sub(replacer, md_text)
+
+def convert_with_pandoc(text):
+    try:
+        result = subprocess.run(
+            ['pandoc', '--from=mediawiki', '--to=markdown'],
+            input=text.encode("utf-8"),
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=True
+        )
+        md = result.stdout.decode("utf-8")
+
+        # Fix pandoc escaping of single quotes like It\'s
+        md = md.replace("\\'", "'")
+
+        md = extract_links_from_pandoc(md)
+        md = fix_multiline_wikilinks(md)
+        md = clean_heading_ids(md)
+        return md
+    except subprocess.CalledProcessError as e:
+        print("⚠️ Pandoc conversion failed. Using unconverted text.")
+        print(e.stderr.decode())
+        return text
+
+def clean_and_convert_text(raw_text, title):
+    text = unescape(raw_text)
+    text = extract_links(text)
+    text, tags = extract_categories(text)
+    text, infobox_data = extract_infobox_to_yaml(text)
+    yaml_header = extract_yaml_header(title, tags, infobox_data)
+
+    for tag in tags:
+        normalized_tag = tag.replace(" ", "_").lower()
+        tag_to_pages[normalized_tag].append(title)
+
+    return yaml_header + "\n" + text.strip() + "\n", tags
+
+def convert_pages(tree):
+    ns = {"ns": NS}
+    for page in tree.findall(".//ns:page", ns):
+        title_elem = page.find("ns:title", ns)
+        if title_elem is None:
+            continue
+        title = title_elem.text.strip()
+        print("✅ Found page:", title)
+
+        revision = page.find(TAG("revision"))
+        if revision is None:
+            print(f"⚠️ No revision for: {title}")
+            continue
+
+        text_elem = revision.find(TAG("text"))
+        if text_elem is None or not text_elem.text or not text_elem.text.strip():
+            print(f"⚠️ No content in: {title}")
+            continue
+
+        raw_text = text_elem.text
+        markdown, tags = clean_and_convert_text(raw_text, title)
+
+        if USE_PANDOC:
+            yaml_match = re.match(r'(?s)^---\n(.*?)\n---\n(.*)', markdown)
+            if yaml_match:
+                yaml_block, content = yaml_match.groups()
+                converted_md = convert_with_pandoc(content)
+
+                # Unwrap markdown output here too
+                converted_md = unwrap_text_paragraphs(converted_md)
+
+                markdown = f"---\n{yaml_block}\n---\n{converted_md}"
+
+        base_filename = clean_filename(title)
+        count = filename_counts[base_filename]
+        filename_counts[base_filename] += 1
+
+        filename = f"{base_filename}{'_' + str(count) if count else ''}.md"
+        filepath = os.path.join(OUTPUT_DIR, filename)
+
+        with open(filepath, "w", encoding="utf-8") as f:
+            print(f"✍️ Writing: {filepath}")
+            f.write(markdown)
+
+    print("✅ Main articles converted.")
+
+def create_tag_indexes():
+    index_dir = os.path.join(OUTPUT_DIR, "_indexes")
+    os.makedirs(index_dir, exist_ok=True)
+
+    for tag, pages in tag_to_pages.items():
+        safe_tag = clean_filename(tag)
+        lines = [f"# {tag.replace('_', ' ').title()} Index\n"]
+        for page in sorted(pages):
+            lines.append(f"- [[{page}]]")
+        with open(os.path.join(index_dir, f"{safe_tag}.md"), "w", encoding="utf-8") as f:
+            f.write("\n".join(lines))
+    print("📚 Index pages created under _indexes/")
+
+def main():
+    print("🔄 Converting MediaWiki XML to Obsidian Vault...")
+    try:
+        tree = ET.parse(INPUT_XML)
+    except ET.ParseError as e:
+        print(f"❌ Failed to parse XML: {e}")
+        return
+
+    convert_pages(tree)
+    create_tag_indexes()
+    print(f"✅ All done! Markdown vault ready at: {OUTPUT_DIR}")
+
+if __name__ == "__main__":
+    main()
