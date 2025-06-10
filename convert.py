@@ -59,10 +59,24 @@ def extract_infobox_to_yaml(text):
     infobox_data['infobox'] = infobox_type
 
     for param in infobox_template.params:
-        # Handle malformed keys with colons
         key = str(param.name).strip().replace(":", "").lower()
         val = str(param.value).strip()
-        infobox_data[key] = val
+
+        # Split values containing wikilinks into lists
+        wikilinks = re.findall(r'\[\[([^\]]+)\]\]', val)
+        if wikilinks:
+            parts = []
+            remaining = val
+            for link in wikilinks:
+                before, link_part, remaining = remaining.partition(f"[[{link}]]")
+                if before.strip():
+                    parts.append(before.strip())
+                parts.append(f"[[{link}]]")
+            if remaining.strip():
+                parts.append(remaining.strip())
+            infobox_data[key] = parts
+        else:
+            infobox_data[key] = val
 
     wikicode.remove(infobox_template)
     return str(wikicode).strip(), infobox_data
@@ -71,14 +85,23 @@ def extract_yaml_header(title, tags, extra_fields=None):
     yaml = {'title': title, 'tags': [t.replace(" ", "_").lower() for t in tags]}
     if extra_fields:
         yaml.update(extra_fields)
+
     lines = ['---']
-    for k, v in yaml.items():
-        if isinstance(v, list):
-            lines.append(f"{k}:")
-            for item in v:
-                lines.append(f"  - {item}")
+    for key, value in yaml.items():
+        if isinstance(value, list):
+            lines.append(f"{key}:")
+            for item in value:
+                # Always quote list items that contain square brackets (Obsidian links)
+                if isinstance(item, str) and ('[[' in item or ']]' in item):
+                    lines.append(f'  - "{item}"')
+                else:
+                    lines.append(f'  - "{item}"' if isinstance(item, str) else f'  - {item}')
         else:
-            lines.append(f'{k}: "{v}"')
+            # Always quote values containing square brackets (Obsidian links)
+            if isinstance(value, str) and ('[[' in value or ']]' in value):
+                lines.append(f'{key}: "{value}"')
+            else:
+                lines.append(f'{key}: "{value}"' if isinstance(value, str) else f'{key}: {value}')
     lines.append('---\n')
     return "\n".join(lines)
 
@@ -127,9 +150,25 @@ def clean_heading_ids(md_text):
     return re.sub(r'^(#{1,6} .+?)\s*\{\#.*?\}', r'\1', md_text, flags=re.MULTILINE)
 
 def extract_links_from_pandoc(md_text):
-    # Convert markdown links with title "wikilink" to Obsidian style [[link]]
-    pattern = re.compile(r'\[([^\]]+)\]\(([^\)]+) "wikilink"\)')
-    return pattern.sub(r'[[\1]]', md_text)
+    """
+    Convert all [text](target) and [text](target "wikilink") to [[target|text]].
+    Handles parentheses in targets (e.g., "Sofia(town)").
+    """
+    # Regex to match [text](target) or [text](target "wikilink")
+    pattern = re.compile(
+        r'\[([^\]]+)\]\(([^\)]+?(?:\([^\)]*\))?(?:\s+"wikilink")?)\)'
+    )
+
+    def replacer(match):
+        text = match.group(1).strip()
+        target = match.group(2).replace(' "wikilink"', '').strip()
+        return f"[[{target}|{text}]]" if text != target else f"[[{target}]]"
+
+    return pattern.sub(replacer, md_text)
+
+def clean_residual_wikilink_artifacts(md_text):
+    """Clean up any remaining "wikilink" strings that weren't caught earlier."""
+    return md_text.replace(' "wikilink"', '')
 
 def fix_multiline_wikilinks(md_text):
     pattern = re.compile(r'\[\[(.*?)\]\]', re.DOTALL)
@@ -150,11 +189,12 @@ def convert_with_pandoc(text):
         )
         md = result.stdout.decode("utf-8")
 
-        # Fix pandoc escaping of single quotes like It\'s
+        # Fix common Pandoc artifacts
         md = md.replace("\\'", "'")
         md = fix_multiline_wikilinks(md)
         md = clean_heading_ids(md)
-        md = extract_links_from_pandoc(md)
+        md = extract_links_from_pandoc(md)      # Handle wikilinks
+        md = clean_residual_wikilink_artifacts(md)  # Clean leftovers
         return md
     except subprocess.CalledProcessError as e:
         print("⚠️ Pandoc conversion failed. Using unconverted text.")
@@ -199,9 +239,8 @@ def convert_pages(tree):
             yaml_match = re.match(r'(?s)^---\n(.*?)\n---\n(.*)', markdown)
             if yaml_match:
                 yaml_block, content = yaml_match.groups()
-                converted_md = convert_with_pandoc(content)
-
-                # Unwrap markdown output here too
+                converted_md = unwrap_text_paragraphs(content)
+                converted_md = convert_with_pandoc(converted_md)
                 converted_md = unwrap_text_paragraphs(converted_md)
 
                 markdown = f"---\n{yaml_block}\n---\n{converted_md}"
