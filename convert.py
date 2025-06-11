@@ -240,17 +240,21 @@ def convert_pages(tree):
 def create_tag_indexes():
     index_dir = os.path.join(OUTPUT_DIR, "_indexes")
     os.makedirs(index_dir, exist_ok=True)
-
     for tag, pages in tag_to_pages.items():
         safe_tag = clean_filename(tag)
         display_tag = display_title(tag)
-        lines = [f"# {display_tag.title()} Index\n"]
+        yaml_header = extract_yaml_header(
+            f"Index: {display_tag}",
+            [safe_tag],
+        )
+        lines = [f"# {display_tag.title()} Index"]
         for page in sorted(pages):
             display_page = display_title(page)
             lines.append(f"- [[{display_page}]]")
+        content = yaml_header + "\n".join(lines)
         with open(os.path.join(index_dir, f"{safe_tag}.md"), "w", encoding="utf-8") as f:
-            f.write("\n".join(lines))
-    print("📚 Index pages created under _indexes/")
+            f.write(content)
+    print("📚 Index pages created under _indexes/ with tag references")
 
 def main():
     print("🔄 Converting MediaWiki XML to Obsidian Vault...")
