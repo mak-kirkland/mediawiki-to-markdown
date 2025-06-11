@@ -110,7 +110,7 @@ def extract_infobox(wikicode):
 def extract_yaml_header(title, tags, extra_fields=None):
     yaml = {
         'title': display_title(title),
-        'tags': [display_title(t).lower() for t in tags]
+        'tags': [display_title(t).lower().replace(" ", "_") for t in tags]
     }
     if extra_fields:
         yaml.update(extra_fields)
