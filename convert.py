@@ -186,6 +186,12 @@ def clean_and_convert_text(raw_text, title):
     wikicode, tags = extract_categories(wikicode)
     wikicode, infobox_data = extract_infobox(wikicode)
 
+    # Infer category from infobox type if not already present
+    if 'infobox' in infobox_data:
+        inferred_tag = infobox_data['infobox'].lower() + 's'  # e.g., "Character" -> "characters"
+        if inferred_tag not in [t.lower() for t in tags]:
+            tags.append(inferred_tag)
+
     cleaned_text = str(wikicode).strip()
     yaml_header = extract_yaml_header(title, tags, infobox_data)
 
