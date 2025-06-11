@@ -139,9 +139,16 @@ def extract_links_from_pandoc(md_text):
     def replacer(match):
         text = match.group(1).strip()
         target = match.group(2).replace(' "wikilink"', '').strip()
+
         if target.startswith(('http://', 'https://', 'mailto:')):
             return match.group(0)
-        return f"[[{target.replace('_', ' ')}|{text}]]" if text != target else f"[[{target.replace('_', ' ')}]]"
+
+        clean_target = target.replace('_', ' ')
+        # Only include alias if it's actually different
+        if text == clean_target:
+            return f"[[{clean_target}]]"
+        else:
+            return f"[[{clean_target}|{text}]]"
     return PANDOC_LINK_REGEX.sub(replacer, md_text)
 
 def clean_residual_wikilink_artifacts(md_text):
