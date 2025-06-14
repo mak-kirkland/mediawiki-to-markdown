@@ -42,18 +42,16 @@ def display_title(title):
     """Convert to human-readable title with spaces"""
     return title.replace('_', ' ')
 
-def contains_wikilink(s):
-    return isinstance(s, str) and ('[[' in s and ']]' in s)
+def clean_wikilink(link_content):
+    """Centralized wikilink cleaning"""
+    if '|' in link_content:
+        target, alias = link_content.split('|', 1)
+        return f"[[{target.replace('_', ' ')}|{alias}]]"
+    return f"[[{link_content.replace('_', ' ')}]]"
 
 def fix_wikilink_spacing(text):
-    """Convert underscores to spaces in wikilinks"""
-    def replacer(match):
-        link_content = match.group(1)
-        if '|' in link_content:
-            target, alias = link_content.split('|', 1)
-            return f"[[{target.replace('_', ' ')}|{alias}]]"
-        return f"[[{link_content.replace('_', ' ')}]]"
-    return WIKILINK_REGEX.sub(replacer, text)
+    """Convert underscores to spaces in wikilinks using centralized cleaner"""
+    return WIKILINK_REGEX.sub(lambda m: clean_wikilink(m.group(1)), text)
 
 def extract_categories(wikicode):
     categories = []
@@ -120,15 +118,9 @@ def extract_yaml_header(title, tags, extra_fields=None):
         if isinstance(value, list):
             lines.append(f"{key}:")
             for item in value:
-                if contains_wikilink(item):
-                    lines.append(f'  - "{fix_wikilink_spacing(item)}"')
-                else:
-                    lines.append(f'  - {json.dumps(item) if isinstance(item, str) else item}')
+                lines.append(f'  - {json.dumps(fix_wikilink_spacing(item)) if isinstance(item, str) else item}')
         else:
-            if contains_wikilink(value):
-                lines.append(f'{key}: "{fix_wikilink_spacing(value)}"')
-            else:
-                lines.append(f'{key}: {json.dumps(value) if isinstance(value, str) else value}')
+            lines.append(f'{key}: {json.dumps(fix_wikilink_spacing(value)) if isinstance(value, str) else value}')
     lines.append('---\n')
     return "\n".join(lines)
 
@@ -180,33 +172,34 @@ def convert_with_pandoc(text, title=""):
         )
         md = result.stdout.decode("utf-8")
         md = md.replace("\\'", "'")
-        return cleanup_markdown(md)
+        return md
     except subprocess.CalledProcessError as e:
         print(f"⚠️ Pandoc failed for '{title}'. Using raw text.")
         print(e.stderr.decode())
         return text
 
+# Updated clean_and_convert_text
 def clean_and_convert_text(raw_text, title):
     text = unescape(raw_text)
     wikicode = mwparserfromhell.parse(text)
-
     wikicode, tags = extract_categories(wikicode)
     wikicode, infobox_data = extract_infobox(wikicode)
 
-    # Infer category from infobox type if not already present
-    if 'infobox' in infobox_data:
-        inferred_tag = infobox_data['infobox'].lower() + 's'  # e.g., "Character" -> "characters"
+    # Conditionally infer tag
+    if infobox_data.get('infobox'):
+        inferred_tag = f"{infobox_data['infobox'].lower()}s"
         if inferred_tag not in [t.lower() for t in tags]:
             tags.append(inferred_tag)
 
     cleaned_text = str(wikicode).strip()
     yaml_header = extract_yaml_header(title, tags, infobox_data)
 
+    # Track tags for index
     for tag in tags:
         normalized_tag = tag.replace(" ", "_").lower()
         tag_to_pages[normalized_tag].append(title)
 
-    return yaml_header + "\n" + cleaned_text + "\n", tags
+    return yaml_header, cleaned_text, tags  # Return components separately
 
 def convert_pages(tree):
     ns = {"ns": NS}
@@ -228,15 +221,15 @@ def convert_pages(tree):
             continue
 
         raw_text = text_elem.text
-        markdown, tags = clean_and_convert_text(raw_text, title)
+
+        yaml_str, wikitext, tags = clean_and_convert_text(raw_text, title)
 
         if USE_PANDOC:
-            yaml_match = YAML_FRONTMATTER_REGEX.match(markdown)
-            if yaml_match:
-                yaml_block, content = yaml_match.groups()
-                converted_md = convert_with_pandoc(content, title)
-                markdown = f"---\n{yaml_block}\n---\n{converted_md}"
+            wikitext = convert_with_pandoc(wikitext, title)
 
+        wikitext = cleanup_markdown(wikitext)
+
+        markdown = f"{yaml_str}\n{wikitext.strip()}\n"
         base_filename = clean_filename(title)
         count = filename_counts[base_filename]
         filename_counts[base_filename] += 1
