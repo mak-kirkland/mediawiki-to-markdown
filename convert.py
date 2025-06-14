@@ -38,6 +38,9 @@ def clean_filename(title):
     """Convert to safe filename with underscores"""
     return INVALID_FILENAME_CHARS.sub('_', title.strip())
 
+def normalize_tag(tag):
+    return tag.replace(" ", "_").lower()
+
 def display_title(title):
     """Convert to human-readable title with spaces"""
     return title.replace('_', ' ')
@@ -108,7 +111,7 @@ def extract_infobox(wikicode):
 def extract_yaml_header(title, tags, extra_fields=None):
     yaml = {
         'title': display_title(title),
-        'tags': [display_title(t).lower().replace(" ", "_") for t in tags]
+        'tags': [normalize_tag(t) for t in tags]
     }
     if extra_fields:
         yaml.update(extra_fields)
@@ -135,7 +138,7 @@ def extract_links_from_pandoc(md_text):
         if target.startswith(('http://', 'https://', 'mailto:')):
             return match.group(0)
 
-        clean_target = target.replace('_', ' ')
+        clean_target = display_title(target)
         # Only include alias if it's actually different
         if text == clean_target:
             return f"[[{clean_target}]]"
@@ -150,7 +153,7 @@ def fix_multiline_wikilinks(md_text):
     def replacer(match):
         content = match.group(1)
         clean_content = ' '.join(content.split())
-        return f"[[{clean_content.replace('_', ' ')}]]"
+        return f"[[{display_title(clean_content)}]]"
     return WIKILINK_REGEX.sub(replacer, md_text)
 
 def cleanup_markdown(md):
@@ -196,7 +199,7 @@ def clean_and_convert_text(raw_text, title):
 
     # Track tags for index
     for tag in tags:
-        normalized_tag = tag.replace(" ", "_").lower()
+        normalized_tag = normalize_tag(tag)
         tag_to_pages[normalized_tag].append(title)
 
     return yaml_header, cleaned_text, tags  # Return components separately
