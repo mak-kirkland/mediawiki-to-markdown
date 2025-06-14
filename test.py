@@ -41,7 +41,7 @@ def test_extract_links_from_pandoc_external():
 # Test 4: YAML frontmatter generation
 def test_extract_yaml_header_basic():
     title = "Sample_Page"
-    tags = ["Category One", "Tag Two"]
+    tags = ["category_one", "tag_two"]
     yaml = extract_yaml_header(title, tags)
     assert "---" in yaml
     assert "title: \"Sample Page\"" in yaml

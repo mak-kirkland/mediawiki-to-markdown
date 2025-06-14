@@ -62,7 +62,7 @@ def extract_categories(wikicode):
         target = link.title.strip()
         if target.lower().startswith("category:"):
             cat = target[len("category:"):].strip()
-            categories.append(cat)
+            categories.append(normalize_tag(cat))
             wikicode.remove(link)
     return wikicode, categories
 
@@ -111,7 +111,7 @@ def extract_infobox(wikicode):
 def extract_yaml_header(title, tags, extra_fields=None):
     yaml = {
         'title': display_title(title),
-        'tags': [normalize_tag(t) for t in tags]
+        'tags': tags
     }
     if extra_fields:
         yaml.update(extra_fields)
@@ -191,7 +191,7 @@ def clean_and_convert_text(raw_text, title):
     # Conditionally infer tag
     if infobox_data.get('infobox'):
         inferred_tag = f"{infobox_data['infobox'].lower()}s"
-        if inferred_tag not in [t.lower() for t in tags]:
+        if inferred_tag not in tags:
             tags.append(inferred_tag)
 
     cleaned_text = str(wikicode).strip()
@@ -199,8 +199,7 @@ def clean_and_convert_text(raw_text, title):
 
     # Track tags for index
     for tag in tags:
-        normalized_tag = normalize_tag(tag)
-        tag_to_pages[normalized_tag].append(title)
+        tag_to_pages[tag].append(title)
 
     return yaml_header, cleaned_text, tags  # Return components separately
 
@@ -250,18 +249,17 @@ def create_tag_indexes():
     index_dir = os.path.join(OUTPUT_DIR, "_indexes")
     os.makedirs(index_dir, exist_ok=True)
     for tag, pages in tag_to_pages.items():
-        safe_tag = clean_filename(tag)
         display_tag = display_title(tag)
         yaml_header = extract_yaml_header(
             f"Index: {display_tag}",
-            [safe_tag],
+            tag,
         )
         lines = [f"# {display_tag.title()} Index"]
         for page in sorted(pages):
             display_page = display_title(page)
             lines.append(f"- [[{display_page}]]")
         content = yaml_header + "\n".join(lines)
-        with open(os.path.join(index_dir, f"{safe_tag}.md"), "w", encoding="utf-8") as f:
+        with open(os.path.join(index_dir, f"{tag}.md"), "w", encoding="utf-8") as f:
             f.write(content)
     print("📚 Index pages created under _indexes/ with tag references")
 
