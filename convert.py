@@ -10,7 +10,8 @@ import json
 
 # Constants
 NS = "http://www.mediawiki.org/xml/export-0.11/"
-TAG = lambda t: f"{{{NS}}}{t}"
+def TAG(t):
+    return f"{{{NS}}}{t}"
 USE_PANDOC = True
 
 # Pre-compiled regex patterns
