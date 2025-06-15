@@ -20,7 +20,6 @@ WIKILINK_REGEX = re.compile(r'\[\[(.*?)\]\]', re.DOTALL)
 PANDOC_LINK_REGEX = re.compile(
     r'\[([^\]]+)\]\(((?:[^\(\)]+|\([^\)]*\))+)(?:\s+"wikilink")?\)'
 )
-YAML_FRONTMATTER_REGEX = re.compile(r'(?s)^---\n(.*?)\n---\n(.*)')
 
 if len(sys.argv) < 2:
     print(f"Usage: {sys.argv[0]} <input_xml_file> [output_dir]")
