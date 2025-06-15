@@ -7,12 +7,14 @@ from collections import defaultdict
 import mwparserfromhell
 import sys
 import json
+import requests
 
 # Constants
 NS = "http://www.mediawiki.org/xml/export-0.11/"
 def TAG(t):
     return f"{{{NS}}}{t}"
 USE_PANDOC = True
+IMAGE_DIR = "images"
 
 # Pre-compiled regex patterns
 INVALID_FILENAME_CHARS = re.compile(r'[\\/*?:"<>|]')
@@ -33,6 +35,20 @@ os.makedirs(OUTPUT_DIR, exist_ok=True)
 
 tag_to_pages = defaultdict(list)
 filename_counts = defaultdict(int)
+
+WIKI_DOMAIN = None
+
+def extract_wiki_domain(tree):
+    global WIKI_DOMAIN
+    ns = {"ns": NS}
+    base_elem = tree.find(".//ns:siteinfo/ns:base", ns)
+    if base_elem is not None and base_elem.text:
+        base_url = base_elem.text.strip()
+        match = re.match(r"https?://([^/]+)/", base_url)
+        if match:
+            WIKI_DOMAIN = match.group(1)
+            return
+    raise ValueError("Could not extract wiki domain from <base> tag.")
 
 def clean_filename(title):
     """Convert to safe filename with underscores"""
@@ -65,6 +81,79 @@ def extract_categories(wikicode):
             categories.append(normalize_tag(cat))
             wikicode.remove(link)
     return wikicode, categories
+
+def extract_images(wikicode):
+    images = set()
+    nodes = list(wikicode.nodes)  # make a list copy because we'll modify
+
+    for i, node in enumerate(nodes):
+        if isinstance(node, mwparserfromhell.wikicode.Wikilink):
+            target = node.title.strip()
+            if target.lower().startswith(("file:", "image:")):
+                image_name = target.split(":", 1)[1].strip()
+                local_filename = download_image(image_name)
+
+                if local_filename:
+                    embed_link = f"![[{IMAGE_DIR}/{local_filename}]]"
+
+                    # Replace the wikilink node in wikicode directly
+                    wikicode.replace(node, embed_link)
+
+                    images.add(embed_link)
+    return wikicode
+
+# Use this to retrieve image URLs from the wiki
+def get_image_url(wiki_domain, filename):
+    url = f"https://{wiki_domain}/api.php"
+    params = {
+        "action": "query",
+        "format": "json",
+        "prop": "imageinfo",
+        "titles": filename,
+        "iiprop": "url"
+    }
+    try:
+        resp = requests.get(url, params=params, timeout=10)
+        data = resp.json()
+        pages = data.get("query", {}).get("pages", {})
+        for page in pages.values():
+            ii = page.get("imageinfo")
+            if ii:
+                return ii[0]["url"]
+    except Exception as e:
+        print(f"❌ Failed to get image URL for {filename}: {e}")
+    return None
+
+def download_image(image_name):
+    if not image_name:
+        return None
+
+    safe_name = clean_filename(image_name)
+    filepath = os.path.join(OUTPUT_DIR, IMAGE_DIR, safe_name)
+    if os.path.exists(filepath):
+        print(f"🖼️ Skipping download (already exists): {safe_name}")
+        return safe_name
+
+    url = get_image_url(WIKI_DOMAIN, f"File:{image_name}")
+    if not url:
+        print(f"❌ Could not find URL for image: {image_name}")
+        return None
+
+    try:
+        resp = requests.get(url, stream=True)
+        if resp.status_code == 200:
+            os.makedirs(os.path.dirname(filepath), exist_ok=True)
+            with open(filepath, "wb") as f:
+                for chunk in resp.iter_content(chunk_size=8192):
+                    f.write(chunk)
+            print(f"📥 Downloaded image: {safe_name}")
+            return safe_name
+        else:
+            print(f"❌ Failed to download image: {image_name} ({resp.status_code})")
+            return None
+    except Exception as e:
+        print(f"❌ Error downloading {image_name}: {e}")
+        return None
 
 def extract_infobox(wikicode):
     infobox_data = {}
@@ -106,6 +195,14 @@ def extract_infobox(wikicode):
             infobox_data[key] = val
 
     wikicode.remove(infobox_template)
+
+    # Extract the image from the infox and inline it at top of markdown
+    if image_name := infobox_data.get('image'):
+        image_name = image_name.strip()
+        download_image(image_name)
+        embed = f"![[{IMAGE_DIR}/{image_name}]]\n\n"
+        wikicode.insert(0, embed)
+
     return wikicode, infobox_data
 
 def extract_yaml_header(title, tags, extra_fields=None):
@@ -156,12 +253,16 @@ def fix_multiline_wikilinks(md_text):
         return f"[[{display_title(clean_content)}]]"
     return WIKILINK_REGEX.sub(replacer, md_text)
 
+def fix_image_links(md):
+    return re.sub(r'\\(!\[\[)', r'\1', md)
+
 def cleanup_markdown(md):
     md = fix_multiline_wikilinks(md)
     md = clean_heading_ids(md)
     md = extract_links_from_pandoc(md)
     md = clean_residual_wikilink_artifacts(md)
     md = fix_wikilink_spacing(md)
+    md = fix_image_links(md)
     return md
 
 def convert_with_pandoc(text, title=""):
@@ -186,6 +287,7 @@ def clean_and_convert_text(raw_text, title):
     text = unescape(raw_text)
     wikicode = mwparserfromhell.parse(text)
     wikicode, tags = extract_categories(wikicode)
+    wikicode = extract_images(wikicode)
     wikicode, infobox_data = extract_infobox(wikicode)
 
     # Conditionally infer tag
@@ -201,7 +303,7 @@ def clean_and_convert_text(raw_text, title):
     for tag in tags:
         tag_to_pages[tag].append(title)
 
-    return yaml_header, cleaned_text, tags  # Return components separately
+    return yaml_header, cleaned_text, tags
 
 def convert_pages(tree):
     ns = {"ns": NS}
@@ -269,6 +371,12 @@ def main():
         tree = ET.parse(INPUT_XML)
     except ET.ParseError as e:
         print(f"❌ Failed to parse XML: {e}")
+        return
+
+    try:
+        extract_wiki_domain(tree)
+    except ValueError as e:
+        print(f"❌ {e}")
         return
 
     convert_pages(tree)
