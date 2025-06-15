@@ -246,18 +246,10 @@ def extract_links_from_pandoc(md_text):
 def clean_residual_wikilink_artifacts(md_text):
     return md_text.replace(' "wikilink"', '')
 
-def fix_multiline_wikilinks(md_text):
-    def replacer(match):
-        content = match.group(1)
-        clean_content = ' '.join(content.split())
-        return f"[[{display_title(clean_content)}]]"
-    return WIKILINK_REGEX.sub(replacer, md_text)
-
 def fix_image_links(md):
     return re.sub(r'\\(!\[\[)', r'\1', md)
 
 def cleanup_markdown(md):
-    md = fix_multiline_wikilinks(md)
     md = clean_heading_ids(md)
     md = extract_links_from_pandoc(md)
     md = clean_residual_wikilink_artifacts(md)
