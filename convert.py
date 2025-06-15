@@ -259,7 +259,7 @@ def create_tag_indexes():
             display_page = display_title(page)
             lines.append(f"- [[{display_page}]]")
         content = yaml_header + "\n".join(lines)
-        with open(os.path.join(index_dir, f"{tag}.md"), "w", encoding="utf-8") as f:
+        with open(os.path.join(index_dir, f"_{tag}.md"), "w", encoding="utf-8") as f:
             f.write(content)
     print("📚 Index pages created under _indexes/ with tag references")
 
