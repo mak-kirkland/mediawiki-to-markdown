@@ -3,6 +3,8 @@ Converts an XML MediaWiki export to Markdown files.
 
 Suitable for migrating a Fandom Wiki to an Obsidian vault.
 
+Requires Pandoc! e.g `apt install pandoc`
+
 Handles
 - Content and formatting (headers, bold, italic etc.)
 - Links and aliases
@@ -14,3 +16,5 @@ Handles
 # Usage
 1. Download the XML export of the wiki (e.g go to WIKIURL/wiki/Special:Export and hand it a list of pages, obtainable from Special:AllPage)
 2. Run `python3 convert.py FILENAME.xml`
+
+Append `--debug` to see better logging.
