@@ -7,8 +7,9 @@ Handles
 - Content and formatting (headers, bold, italic etc.)
 - Links and aliases
 - Categories (mapped to "tags" in Obsidian)
-- Infoboxes (converted to YAML frontmatters, also inferring the category "tag")
+- Infoboxes (converted to YAML frontmatters, also inferring the category "tag" as a plural using noun inflection)
 - Image downloads!
+- Can skip redirect pages given `--skip-redirects`
 
 # Usage
 1. Download the XML export of the wiki (e.g go to WIKIURL/wiki/Special:Export and hand it a list of pages, obtainable from Special:AllPage)
