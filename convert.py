@@ -11,6 +11,7 @@ import requests
 import yaml
 import argparse
 import inflect
+import logging
 
 p = inflect.engine()
 
@@ -34,9 +35,16 @@ def parse_args():
     parser.add_argument("input_xml", help="Input XML file")
     parser.add_argument("output_dir", nargs="?", default="obsidian_vault", help="Output directory")
     parser.add_argument("--skip-redirects", action="store_true", help="Skip redirect pages")
+    parser.add_argument("--debug", action="store_true", help="Enable debug logging")
     return parser.parse_args()
 
 args = parse_args()
+
+logging.basicConfig(
+    level=logging.DEBUG if args.debug else logging.INFO,
+    format='%(message)s',
+    handlers=[logging.StreamHandler(sys.stdout)]
+)
 
 INPUT_XML = args.input_xml
 OUTPUT_DIR = args.output_dir
@@ -113,7 +121,6 @@ def extract_images(wikicode):
                     images.add(embed_link)
     return wikicode
 
-# Use this to retrieve image URLs from the wiki
 def get_image_url(wiki_domain, filename):
     url = f"https://{wiki_domain}/api.php"
     params = {
@@ -132,7 +139,7 @@ def get_image_url(wiki_domain, filename):
             if ii:
                 return ii[0]["url"]
     except Exception as e:
-        print(f"❌ Failed to get image URL for {filename}: {e}")
+        logging.error(f"❌ Failed to get image URL for {filename}: {e}")
     return None
 
 def download_image(image_name):
@@ -142,12 +149,12 @@ def download_image(image_name):
     safe_name = clean_filename(image_name)
     filepath = os.path.join(OUTPUT_DIR, IMAGE_DIR, safe_name)
     if os.path.exists(filepath):
-        print(f"🖼️ Skipping download (already exists): {safe_name}")
+        logging.debug(f"🖼️ Skipping download (already exists): {safe_name}")
         return safe_name
 
     url = get_image_url(WIKI_DOMAIN, f"File:{image_name}")
     if not url:
-        print(f"❌ Could not find URL for image: {image_name}")
+        logging.warning(f"❌ Could not find URL for image: {image_name}")
         return None
 
     try:
@@ -157,13 +164,13 @@ def download_image(image_name):
             with open(filepath, "wb") as f:
                 for chunk in resp.iter_content(chunk_size=8192):
                     f.write(chunk)
-            print(f"📥 Downloaded image: {safe_name}")
+            logging.info(f"📥 Downloaded image: {safe_name}")
             return safe_name
         else:
-            print(f"❌ Failed to download image: {image_name} ({resp.status_code})")
+            logging.error(f"❌ Failed to download image: {image_name} ({resp.status_code})")
             return None
     except Exception as e:
-        print(f"❌ Error downloading {image_name}: {e}")
+        logging.error(f"❌ Error downloading {image_name}: {e}")
         return None
 
 def extract_infobox(wikicode):
@@ -224,7 +231,7 @@ def sanitize_for_yaml(obj):
     elif isinstance(obj, (str, int, float, bool, type(None))):
         return obj
     else:
-        return str(obj)  # fallback: stringify unknown types
+        return str(obj)
 
 def extract_yaml_header(title, tags, extra_fields=None):
     header = {
@@ -282,11 +289,10 @@ def convert_with_pandoc(text, title=""):
         md = md.replace("\\'", "'")
         return md
     except subprocess.CalledProcessError as e:
-        print(f"⚠️ Pandoc failed for '{title}'. Using raw text.")
-        print(e.stderr.decode())
+        logging.warning(f"⚠️ Pandoc failed for '{title}'. Using raw text.")
+        logging.debug(e.stderr.decode())
         return text
 
-# Updated clean_and_convert_text
 def clean_and_convert_text(raw_text, title):
     text = unescape(raw_text)
     wikicode = mwparserfromhell.parse(text)
@@ -323,20 +329,20 @@ def convert_pages(tree):
             continue
 
         if SKIP_REDIRECTS and (page.find("ns:redirect", ns) is not None):
-            print(f"⏭️ Skipping redirect: {title}")
+            logging.debug(f"⏭️ Skipping redirect: {title_elem.text.strip()}")
             continue
 
         title = title_elem.text.strip()
-        print("✅ Found page:", title)
+        logging.debug(f"✅ Found page: {title}")
 
         revision = page.find(TAG("revision"))
         if revision is None:
-            print(f"⚠️ No revision for: {title}")
+            logging.warning(f"⚠️ No revision for: {title}")
             continue
 
         text_elem = revision.find(TAG("text"))
         if text_elem is None or not text_elem.text or not text_elem.text.strip():
-            print(f"⚠️ No content in: {title}")
+            logging.warning(f"⚠️ No content in: {title}")
             continue
 
         raw_text = text_elem.text
@@ -357,20 +363,17 @@ def convert_pages(tree):
         filepath = os.path.join(OUTPUT_DIR, filename)
 
         with open(filepath, "w", encoding="utf-8") as f:
-            print(f"✍️ Writing: {filepath}")
+            logging.info(f"✍️ Writing: {filepath}")
             f.write(markdown)
 
-    print("✅ Main articles converted.")
+    logging.info("✅ Main articles converted.")
 
 def create_tag_indexes():
     index_dir = os.path.join(OUTPUT_DIR, "_indexes")
     os.makedirs(index_dir, exist_ok=True)
     for tag, pages in tag_to_pages.items():
         display_tag = display_title(tag)
-        yaml_header = extract_yaml_header(
-            f"Index: {display_tag}",
-            tag,
-        )
+        yaml_header = extract_yaml_header(f"Index: {display_tag}", tag)
         lines = [f"# {display_tag.title()} Index"]
         for page in sorted(pages):
             display_page = display_title(page)
@@ -378,25 +381,25 @@ def create_tag_indexes():
         content = yaml_header + "\n".join(lines)
         with open(os.path.join(index_dir, f"_{tag}.md"), "w", encoding="utf-8") as f:
             f.write(content)
-    print("📚 Index pages created under _indexes/ with tag references")
+    logging.info("📚 Index pages created under _indexes/ with tag references")
 
 def main():
-    print("🔄 Converting MediaWiki XML to Obsidian Vault...")
+    logging.info("🔄 Converting MediaWiki XML to Obsidian Vault...")
     try:
         tree = ET.parse(INPUT_XML)
     except ET.ParseError as e:
-        print(f"❌ Failed to parse XML: {e}")
+        logging.error(f"❌ Failed to parse XML: {e}")
         return
 
     try:
         extract_wiki_domain(tree)
     except ValueError as e:
-        print(f"❌ {e}")
+        logging.error(f"❌ {e}")
         return
 
     convert_pages(tree)
     create_tag_indexes()
-    print(f"✅ All done! Markdown vault ready at: {OUTPUT_DIR}")
+    logging.info(f"✅ All done! Markdown vault ready at: {OUTPUT_DIR}")
 
 if __name__ == "__main__":
     main()
