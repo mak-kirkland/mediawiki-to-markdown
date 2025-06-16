@@ -1,1 +1,5 @@
 mwparserfromhell
+requests
+pyyaml
+tqdm
+inflect
