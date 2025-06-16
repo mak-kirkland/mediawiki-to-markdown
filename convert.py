@@ -20,7 +20,7 @@ p = inflect.engine()
 NS = "http://www.mediawiki.org/xml/export-0.11/"
 def TAG(t):
     return f"{{{NS}}}{t}"
-USE_PANDOC = True
+
 IMAGE_DIR = "images"
 
 # Pre-compiled regex patterns
@@ -356,19 +356,13 @@ def convert_pages(tree):
                 continue
 
             raw_text = text_elem.text
-
             yaml_str, wikitext, tags = clean_and_convert_text(raw_text, title)
-
-            if USE_PANDOC:
-                wikitext = convert_with_pandoc(wikitext, title)
-
+            wikitext = convert_with_pandoc(wikitext, title)
             wikitext = cleanup_markdown(wikitext)
-
             markdown = f"{yaml_str}\n{wikitext.strip()}\n"
             base_filename = clean_filename(title)
             count = filename_counts[base_filename]
             filename_counts[base_filename] += 1
-
             filename = f"{base_filename}{'_' + str(count) if count else ''}.md"
             filepath = os.path.join(OUTPUT_DIR, filename)
 
