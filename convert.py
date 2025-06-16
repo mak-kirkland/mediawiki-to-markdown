@@ -10,6 +10,9 @@ import json
 import requests
 import yaml
 import argparse
+import inflect
+
+p = inflect.engine()
 
 # Constants
 NS = "http://www.mediawiki.org/xml/export-0.11/"
@@ -293,7 +296,13 @@ def clean_and_convert_text(raw_text, title):
 
     # Conditionally infer tag
     if infobox_data.get('infobox'):
-        inferred_tag = f"{infobox_data['infobox'].lower()}s"
+        infobox_name = str(infobox_data['infobox'])
+
+        if not p.singular_noun(infobox_name):
+            infobox_name = p.plural(infobox_name)
+
+        inferred_tag = normalize_tag(infobox_name)
+
         if inferred_tag not in tags:
             tags.append(inferred_tag)
 
