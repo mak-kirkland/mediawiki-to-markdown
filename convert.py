@@ -12,6 +12,7 @@ import yaml
 import argparse
 import inflect
 import logging
+from tqdm import tqdm
 
 p = inflect.engine()
 
@@ -164,7 +165,7 @@ def download_image(image_name):
             with open(filepath, "wb") as f:
                 for chunk in resp.iter_content(chunk_size=8192):
                     f.write(chunk)
-            logging.info(f"📥 Downloaded image: {safe_name}")
+            logging.debug(f"📥 Downloaded image: {safe_name}")
             return safe_name
         else:
             logging.error(f"❌ Failed to download image: {image_name} ({resp.status_code})")
@@ -323,50 +324,61 @@ def clean_and_convert_text(raw_text, title):
 
 def convert_pages(tree):
     ns = {"ns": NS}
-    for page in tree.findall(".//ns:page", ns):
-        title_elem = page.find("ns:title", ns)
-        if title_elem is None or not title_elem.text:
-            continue
+    total_pages = len(tree.findall(".//ns:page", {"ns": NS}))
 
-        if SKIP_REDIRECTS and (page.find("ns:redirect", ns) is not None):
-            logging.debug(f"⏭️ Skipping redirect: {title_elem.text.strip()}")
-            continue
+    disable_tqdm = logging.getLogger().level <= logging.DEBUG
 
-        title = title_elem.text.strip()
-        logging.debug(f"✅ Found page: {title}")
+    with tqdm(total=total_pages, desc="Converting pages", disable=disable_tqdm) as pbar:
+        for page in tree.findall(".//ns:page", ns):
+            title_elem = page.find("ns:title", ns)
+            if title_elem is None or not title_elem.text:
+                pbar.update(1)
+                continue
 
-        revision = page.find(TAG("revision"))
-        if revision is None:
-            logging.warning(f"⚠️ No revision for: {title}")
-            continue
+            if SKIP_REDIRECTS and (page.find("ns:redirect", ns) is not None):
+                logging.debug(f"⏭️ Skipping redirect: {title_elem.text.strip()}")
+                pbar.update(1)
+                continue
 
-        text_elem = revision.find(TAG("text"))
-        if text_elem is None or not text_elem.text or not text_elem.text.strip():
-            logging.warning(f"⚠️ No content in: {title}")
-            continue
+            title = title_elem.text.strip()
+            logging.debug(f"✅ Found page: {title}")
 
-        raw_text = text_elem.text
+            revision = page.find(TAG("revision"))
+            if revision is None:
+                logging.warning(f"⚠️ No revision for: {title}")
+                pbar.update(1)
+                continue
 
-        yaml_str, wikitext, tags = clean_and_convert_text(raw_text, title)
+            text_elem = revision.find(TAG("text"))
+            if text_elem is None or not text_elem.text or not text_elem.text.strip():
+                logging.warning(f"⚠️ No content in: {title}")
+                pbar.update(1)
+                continue
 
-        if USE_PANDOC:
-            wikitext = convert_with_pandoc(wikitext, title)
+            raw_text = text_elem.text
 
-        wikitext = cleanup_markdown(wikitext)
+            yaml_str, wikitext, tags = clean_and_convert_text(raw_text, title)
 
-        markdown = f"{yaml_str}\n{wikitext.strip()}\n"
-        base_filename = clean_filename(title)
-        count = filename_counts[base_filename]
-        filename_counts[base_filename] += 1
+            if USE_PANDOC:
+                wikitext = convert_with_pandoc(wikitext, title)
 
-        filename = f"{base_filename}{'_' + str(count) if count else ''}.md"
-        filepath = os.path.join(OUTPUT_DIR, filename)
+            wikitext = cleanup_markdown(wikitext)
 
-        with open(filepath, "w", encoding="utf-8") as f:
-            logging.info(f"✍️ Writing: {filepath}")
-            f.write(markdown)
+            markdown = f"{yaml_str}\n{wikitext.strip()}\n"
+            base_filename = clean_filename(title)
+            count = filename_counts[base_filename]
+            filename_counts[base_filename] += 1
 
-    logging.info("✅ Main articles converted.")
+            filename = f"{base_filename}{'_' + str(count) if count else ''}.md"
+            filepath = os.path.join(OUTPUT_DIR, filename)
+
+            with open(filepath, "w", encoding="utf-8") as f:
+                logging.debug(f"✍️ Writing: {filepath}")
+                f.write(markdown)
+
+            pbar.update(1)
+
+    logging.info("✅ Main articles converted")
 
 def create_tag_indexes():
     index_dir = os.path.join(OUTPUT_DIR, "_indexes")
