@@ -44,10 +44,10 @@ def test_extract_yaml_header_basic():
     tags = ["category_one", "tag_two"]
     yaml = extract_yaml_header(title, tags)
     assert "---" in yaml
-    assert "title: \"Sample Page\"" in yaml
+    assert "title: Sample Page" in yaml
     assert "tags:" in yaml
-    assert "  - \"category_one\"" in yaml
-    assert "  - \"tag_two\"" in yaml
+    assert "- category_one" in yaml
+    assert "- tag_two" in yaml
 
 # Test 5: Infobox parsing and tag inference
 def test_extract_infobox_and_tags():

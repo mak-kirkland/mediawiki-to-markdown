@@ -8,6 +8,7 @@ import mwparserfromhell
 import sys
 import json
 import requests
+import yaml
 
 # Constants
 NS = "http://www.mediawiki.org/xml/export-0.11/"
@@ -205,24 +206,25 @@ def extract_infobox(wikicode):
 
     return wikicode, infobox_data
 
+def sanitize_for_yaml(obj):
+    if isinstance(obj, dict):
+        return {sanitize_for_yaml(k): sanitize_for_yaml(v) for k, v in obj.items()}
+    elif isinstance(obj, list):
+        return [sanitize_for_yaml(i) for i in obj]
+    elif isinstance(obj, (str, int, float, bool, type(None))):
+        return obj
+    else:
+        return str(obj)  # fallback: stringify unknown types
+
 def extract_yaml_header(title, tags, extra_fields=None):
-    yaml = {
+    header = {
         'title': display_title(title),
         'tags': tags
     }
     if extra_fields:
-        yaml.update(extra_fields)
+        header.update(sanitize_for_yaml(extra_fields))
 
-    lines = ['---']
-    for key, value in yaml.items():
-        if isinstance(value, list):
-            lines.append(f"{key}:")
-            for item in value:
-                lines.append(f'  - {json.dumps(fix_wikilink_spacing(item)) if isinstance(item, str) else item}')
-        else:
-            lines.append(f'{key}: {json.dumps(fix_wikilink_spacing(value)) if isinstance(value, str) else value}')
-    lines.append('---\n')
-    return "\n".join(lines)
+    return f"---\n{yaml.safe_dump(header, sort_keys=False)}---\n"
 
 def clean_heading_ids(md_text):
     return HEADING_ID_REGEX.sub(r'\1', md_text)
