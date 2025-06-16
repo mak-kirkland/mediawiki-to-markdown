@@ -9,6 +9,7 @@ import sys
 import json
 import requests
 import yaml
+import argparse
 
 # Constants
 NS = "http://www.mediawiki.org/xml/export-0.11/"
@@ -25,12 +26,18 @@ PANDOC_LINK_REGEX = re.compile(
     r'\[([^\]]+)\]\(((?:[^\(\)]+|\([^\)]*\))+)(?:\s+"wikilink")?\)'
 )
 
-if len(sys.argv) < 2:
-    print(f"Usage: {sys.argv[0]} <input_xml_file> [output_dir]")
-    sys.exit(1)
+def parse_args():
+    parser = argparse.ArgumentParser(description="Convert MediaWiki XML to Obsidian Vault")
+    parser.add_argument("input_xml", help="Input XML file")
+    parser.add_argument("output_dir", nargs="?", default="obsidian_vault", help="Output directory")
+    parser.add_argument("--skip-redirects", action="store_true", help="Skip redirect pages")
+    return parser.parse_args()
 
-INPUT_XML = sys.argv[1]
-OUTPUT_DIR = sys.argv[2] if len(sys.argv) > 2 else "obsidian_vault"
+args = parse_args()
+
+INPUT_XML = args.input_xml
+OUTPUT_DIR = args.output_dir
+SKIP_REDIRECTS = args.skip_redirects
 
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
@@ -305,6 +312,11 @@ def convert_pages(tree):
         title_elem = page.find("ns:title", ns)
         if title_elem is None or not title_elem.text:
             continue
+
+        if SKIP_REDIRECTS and (page.find("ns:redirect", ns) is not None):
+            print(f"⏭️ Skipping redirect: {title}")
+            continue
+
         title = title_elem.text.strip()
         print("✅ Found page:", title)
 
