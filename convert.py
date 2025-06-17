@@ -18,9 +18,6 @@ p = inflect.engine()
 
 # Constants
 NS = "http://www.mediawiki.org/xml/export-0.11/"
-def TAG(t):
-    return f"{{{NS}}}{t}"
-
 IMAGE_DIR = "images"
 
 # Pre-compiled regex patterns
@@ -31,18 +28,21 @@ PANDOC_LINK_REGEX = re.compile(
     r'\[([^\]]+)\]\(((?:[^\(\)]+|\([^\)]*\))+)(?:\s+"wikilink")?\)'
 )
 
+def TAG(t):
+    return f"{{{NS}}}{t}"
+
 def parse_args():
     parser = argparse.ArgumentParser(description="Convert MediaWiki XML to Obsidian Vault")
     parser.add_argument("input_xml", help="Input XML file")
     parser.add_argument("output_dir", nargs="?", default="obsidian_vault", help="Output directory")
     parser.add_argument("--skip-redirects", action="store_true", help="Skip redirect pages")
-    parser.add_argument("--debug", action="store_true", help="Enable debug logging")
+    parser.add_argument("--verbose", action="store_true", help="Enable verbose logging")
     return parser.parse_args()
 
 args = parse_args()
 
 logging.basicConfig(
-    level=logging.DEBUG if args.debug else logging.INFO,
+    level=logging.DEBUG if args.verbose else logging.INFO,
     format='%(message)s',
     handlers=[logging.StreamHandler(sys.stdout)]
 )
