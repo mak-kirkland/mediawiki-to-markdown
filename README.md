@@ -2,6 +2,8 @@
 
 This script converts a MediaWiki XML dump into a clean, tag-driven Obsidian Markdown vault — including images, categories, infoboxes, and structured YAML frontmatter.
 
+🗂️ If you want to organize your Obsidian vault into folders based on tags, check out my [Obsidian Organizer](https://github.com/mak-kirkland/obsidian-organizer).
+
 ## ✨ Features
 
 - ✅ Converts MediaWiki pages to Obsidian-compatible Markdown
