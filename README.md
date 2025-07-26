@@ -2,9 +2,9 @@
 
 This script converts a MediaWiki XML dump into a clean, tag-driven Markdown vault — including images, categories, infoboxes, and structured YAML frontmatter.
 
-🧭 If you want a tool to build and connect your ideas, check out my app [Chronicler](https://github.com/mak-kirkland/chronicler)
+🧭 If you want a tool to build and connect your ideas, check out my app [Chronicler](https://github.com/mak-kirkland/chronicler).
 
-🗂️ If you want to organize your vault into folders based on tags, check out my [Vault Organizer](https://github.com/mak-kirkland/vault-organizer).
+🗂️ If you want to organize your vault into folders based on tags, check out my [Markdown Vault Organizer](https://github.com/mak-kirkland/markdown-vault-organizer).
 
 ## ✨ Features
 
