@@ -1,8 +1,10 @@
-# MediaWiki to Obsidian Vault Converter 🧭
+# MediaWiki to Markdown Vault Converter 🧭
 
-This script converts a MediaWiki XML dump into a clean, tag-driven Obsidian Markdown vault — including images, categories, infoboxes, and structured YAML frontmatter.
+This script converts a MediaWiki XML dump into a clean, tag-driven Markdown vault — including images, categories, infoboxes, and structured YAML frontmatter.
 
-🗂️ If you want to organize your Obsidian vault into folders based on tags, check out my [Obsidian Organizer](https://github.com/mak-kirkland/obsidian-organizer).
+🧭 If you want a tool to build and connect your ideas, check out my app [Chronicler](https://github.com/mak-kirkland/chronicler)
+
+🗂️ If you want to organize your vault into folders based on tags, check out my [Vault Organizer](https://github.com/mak-kirkland/vault-organizer).
 
 ## ✨ Features
 
@@ -11,7 +13,7 @@ This script converts a MediaWiki XML dump into a clean, tag-driven Obsidian Mark
 - 📦 Converts infoboxes into YAML frontmatter (including images)
 - 🔧 Infers tags from infobox types using noun inflection
 - 🖼️ Downloads and embeds images as `![[images/Filename]]`
-- 🔗 Converts internal links to Obsidian `[[Wikilinks]]`
+- 🔗 Converts internal links to `[[Wikilinks]]`
 - 📚 Automatically generates tag-based index files under `_indexes/`
 - 🐢 Supports optional Pandoc for better Markdown rendering
 - 🔍 Verbose mode for detailed output and easier troubleshooting
@@ -46,7 +48,7 @@ python convert.py INPUT_XML [OUTPUT_DIR] [--skip-redirects] [--verbose]
 ## 🗂️ Output Structure
 
 ```text
-obsidian_vault/
+chronicler_vault/
 ├── _indexes/
 │   ├── _people.md
 │   ├── _locations.md
