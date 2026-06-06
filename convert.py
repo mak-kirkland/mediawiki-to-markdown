@@ -343,11 +343,24 @@ def convert_pages(tree):
             title = title_elem.text.strip()
             logging.debug(f"✅ Found page: {title}")
 
-            revision = page.find(TAG("revision"))
-            if revision is None:
+            best_revision = None
+            best_revision_id = None
+            for revision in page.findall(TAG("revision")):
+                revision_id = int(revision.find(TAG("id")).text)
+                if revision_id is None:
+                    logging.warning(f"⚠️ No revision ID for: {title}")
+                    pbar.update(1)
+                    continue
+                if best_revision_id is None or revision_id > best_revision_id:
+                    best_revision_id = revision_id
+                    best_revision = revision
+
+            if best_revision is None:
                 logging.warning(f"⚠️ No revision for: {title}")
                 pbar.update(1)
                 continue
+
+            revision = best_revision
 
             text_elem = revision.find(TAG("text"))
             if text_elem is None or not text_elem.text or not text_elem.text.strip():
