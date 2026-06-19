@@ -1,5 +1,5 @@
-mwparserfromhell
-requests
-pyyaml
-tqdm
-inflect
+mwparserfromhell~=0.7.2
+requests~=2.34.2
+pyyaml~=6.0.3
+tqdm~=4.68.1
+inflect~=7.5.0
