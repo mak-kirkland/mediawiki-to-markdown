@@ -79,3 +79,14 @@ def test_clean_and_convert_text_adds_infobox_tag():
     assert "artifacts" in [t.lower() for t in tags]
     assert "items" in [t.lower() for t in tags]
     assert "---" in yaml
+
+def test_main_missing_input_file_is_clean_error(monkeypatch, caplog):
+    import logging
+
+    import convert
+
+    monkeypatch.setattr(convert, "INPUT_XML", "does-not-exist-12345.xml")
+    with caplog.at_level(logging.ERROR):
+        assert convert.main() is None
+    assert "not found" in caplog.text
+    assert "does-not-exist-12345.xml" in caplog.text

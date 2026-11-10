@@ -393,6 +393,9 @@ def main():
     logging.info("🔄 Converting MediaWiki XML to Obsidian Vault...")
     try:
         tree = ET.parse(INPUT_XML)
+    except FileNotFoundError:
+        logging.error(f"❌ Input file not found: {INPUT_XML}")
+        return
     except ET.ParseError as e:
         logging.error(f"❌ Failed to parse XML: {e}")
         return
